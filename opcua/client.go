@@ -15,8 +15,6 @@ import (
 )
 
 // sensorMeta maps NodeId string → (sensor_id, unit).
-// In a real deployment these come from the OPC UA address space (BrowseName +
-// EUInformation). Here they are hardcoded for the scaffold.
 var sensorMeta = map[string][2]string{
 	"ns=2;i=1001": {"rail_temp_1", "°C"},
 	"ns=2;i=1002": {"wheel_vibration_1", "mm/s"},
@@ -34,7 +32,7 @@ func meta(nodeID string) (string, string) {
 type Handler func(r sse.Reading)
 
 // Run connects to the OPC UA server, creates a subscription, and calls h for
-// every DataChangeNotification. It reconnects automatically on error.
+// every DataChangeNotification. Reconnects automatically with exponential back-off.
 func Run(ctx context.Context, cfg config.Config, h Handler) {
 	backoff := 2.0
 	for {
@@ -57,36 +55,50 @@ func Run(ctx context.Context, cfg config.Config, h Handler) {
 }
 
 func runOnce(ctx context.Context, cfg config.Config, h Handler) error {
-	c := opcua.NewClient(cfg.OpcuaEndpoint, opcua.SecurityModeNone())
+	// NewClient now returns (*Client, error) in v0.5.x
+	c, err := opcua.NewClient(cfg.OpcuaEndpoint,
+		opcua.SecurityMode(ua.MessageSecurityModeNone),
+	)
+	if err != nil {
+		return err
+	}
 	if err := c.Connect(ctx); err != nil {
 		return err
 	}
-	defer c.CloseWithContext(ctx) //nolint:errcheck
+	defer c.Close(ctx) //nolint:errcheck
 	log.Printf("OPC UA connected: %s", cfg.OpcuaEndpoint)
 
 	notifyCh := make(chan *opcua.PublishNotificationData, 128)
-	sub, err := c.SubscribeWithContext(ctx, &opcua.SubscriptionParameters{
+	sub, err := c.Subscribe(ctx, &opcua.SubscriptionParameters{
 		Interval: time.Duration(cfg.OpcuaIntervalMs) * time.Millisecond,
 	}, notifyCh)
 	if err != nil {
 		return err
 	}
-	defer sub.CancelWithContext(ctx) //nolint:errcheck
+	defer sub.Cancel(ctx) //nolint:errcheck
 
-	// Add one MonitoredItem per configured NodeId
-	for _, nidStr := range cfg.OpcuaNodeIDs {
+	// Build a map: clientHandle (uint32 index) → nodeId string
+	handleToNode := make(map[uint32]string)
+	for i, nidStr := range cfg.OpcuaNodeIDs {
 		nodeID, err := ua.ParseNodeID(nidStr)
 		if err != nil {
 			log.Printf("Invalid NodeId %q: %v", nidStr, err)
 			continue
 		}
-		miReq := opcua.NewMonitoredItemCreateRequestWithDefaults(nodeID, ua.AttributeIDValue, nidStr)
-		res, err := sub.Monitor(ua.TimestampsToReturnBoth, miReq)
-		if err != nil || res.Results[0].StatusCode != ua.StatusOK {
-			log.Printf("Failed to monitor %s: %v %v", nidStr, err, res.Results[0].StatusCode)
+		handle := uint32(i + 1) // client handles start at 1
+		handleToNode[handle] = nidStr
+
+		miReq := opcua.NewMonitoredItemCreateRequestWithDefaults(nodeID, ua.AttributeIDValue, handle)
+		res, err := sub.Monitor(ctx, ua.TimestampsToReturnBoth, miReq)
+		if err != nil {
+			log.Printf("Monitor error for %s: %v", nidStr, err)
 			continue
 		}
-		log.Printf("Monitoring NodeId %s", nidStr)
+		if res.Results[0].StatusCode != ua.StatusOK {
+			log.Printf("Monitor status error for %s: %v", nidStr, res.Results[0].StatusCode)
+			continue
+		}
+		log.Printf("Monitoring NodeId %s (handle %d)", nidStr, handle)
 	}
 
 	log.Printf("OPC UA subscription active (%d nodes @ %dms)",
@@ -108,7 +120,11 @@ func runOnce(ctx context.Context, cfg config.Config, h Handler) error {
 				continue
 			}
 			for _, item := range dcn.MonitoredItems {
-				nidStr, _ := item.ClientHandle.(string)
+				// ClientHandle is uint32; look up the nodeId string
+				nidStr, found := handleToNode[item.ClientHandle]
+				if !found {
+					continue
+				}
 				v := item.Value
 				if v == nil || v.Value == nil {
 					continue
@@ -117,9 +133,10 @@ func runOnce(ctx context.Context, cfg config.Config, h Handler) error {
 				if !ok {
 					continue
 				}
-				quality := 0
-				if !v.Status.OK() {
-					quality = int(v.Status)
+				// quality: 0 means Good (ua.StatusOK == 0)
+				quality := int(v.Status)
+				if v.Status == ua.StatusOK {
+					quality = 0
 				}
 				ts := v.SourceTimestamp
 				if ts.IsZero() {
@@ -147,9 +164,13 @@ func toFloat64(v interface{}) (float64, bool) {
 		return float64(t), true
 	case int:
 		return float64(t), true
+	case int16:
+		return float64(t), true
 	case int32:
 		return float64(t), true
 	case int64:
+		return float64(t), true
+	case uint16:
 		return float64(t), true
 	case uint32:
 		return float64(t), true
