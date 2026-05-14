@@ -1,10 +1,10 @@
-# opcua-railway-go
+# opcua-go
 
-Railway sensor telemetry microservice — **Go** implementation.
+OPCUA sensor telemetry microservice — **Go** implementation.
 
-Connects to an OPC UA server on railway hardware, subscribes to sensor nodes, streams live data to browsers via **Server-Sent Events**, and persists readings to **TimescaleDB**.
+Connects to an OPC UA server on OPCUA hardware, subscribes to sensor nodes, streams live data to browsers via **Server-Sent Events**, and persists readings to **TimescaleDB**.
 
-> See the companion [Python implementation](https://github.com/ahmadbass3l/opcua-railway-python) for an identical API in Python.
+> See the companion [Python implementation](https://github.com/ahmadbass3l/opcua-OPCUA-python) for an identical API in Python.
 
 ---
 
@@ -45,8 +45,8 @@ data: {"sensor_id":"rail_temp_1","node_id":"ns=2;i=1001","value":42.3,"unit":"°
 ### Docker Compose (recommended)
 
 ```bash
-git clone https://github.com/ahmadbass3l/opcua-railway-go.git
-cd opcua-railway-go
+git clone https://github.com/ahmadbass3l/opcua-OPCUA-go.git
+cd opcua-OPCUA-go
 cp .env.example .env          # edit OPCUA_ENDPOINT and OPCUA_NODE_IDS
 docker compose up
 ```
@@ -56,7 +56,7 @@ docker compose up
 ```bash
 export OPCUA_ENDPOINT=opc.tcp://192.168.1.100:4840
 export OPCUA_NODE_IDS="ns=2;i=1001,ns=2;i=1002"
-export DB_DSN=postgresql://railway:railway@localhost:5432/railway
+export DB_DSN=postgresql://OPCUA:OPCUA@localhost:5432/OPCUA
 go run .
 ```
 
@@ -69,7 +69,7 @@ go run .
 | `OPCUA_ENDPOINT` | `opc.tcp://localhost:4840` | OPC UA server on the hardware |
 | `OPCUA_NODE_IDS` | `ns=2;i=1001,...` | Comma-separated NodeIds to subscribe to |
 | `OPCUA_INTERVAL_MS` | `500` | Subscription publishing interval (ms) |
-| `DB_DSN` | `postgresql://railway:railway@localhost:5432/railway` | TimescaleDB connection string |
+| `DB_DSN` | `postgresql://OPCUA:OPCUA@localhost:5432/OPCUA` | TimescaleDB connection string |
 | `PORT` | `8080` | HTTP server port |
 
 ---
@@ -77,7 +77,7 @@ go run .
 ## File layout
 
 ```
-opcua-railway-go/
+opcua-OPCUA-go/
 ├── main.go               # Wiring: config, DB, broker, OPC UA client, HTTP server
 ├── config/
 │   └── config.go         # Env var loading
@@ -113,7 +113,7 @@ opcua-railway-go/
 
 ## Database schema
 
-See [`db/init.sql`](https://github.com/ahmadbass3l/opcua-railway-go/blob/main/db/init.sql) — creates the `sensor_readings` hypertable and `readings_1min` continuous aggregate.
+See [`db/init.sql`](https://github.com/ahmadbass3l/opcua-OPCUA-go/blob/main/db/init.sql) — creates the `sensor_readings` hypertable and `readings_1min` continuous aggregate.
 
 ---
 
